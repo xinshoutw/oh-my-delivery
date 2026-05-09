@@ -44,6 +44,7 @@ class Settings(BaseSettings):
 
     pickup_session_ttl_seconds: int = 300
     return_session_ttl_seconds: int = 60
+    sensor_event_max_clock_skew_seconds: int = 300
 
     short_code_length: int = 8
     asset_token_random_chars: int = 16
