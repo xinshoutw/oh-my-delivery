@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { CheckCircle2, ScanLine, X, Truck } from 'lucide-react'
+import { CheckCircle2, Package, ScanLine, X, Truck } from 'lucide-react'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import type {
   CourierOrderItem,
   PickupSession,
   ProgressEntry,
+  RestaurantInventoryItem,
   ScanResult,
 } from '@/types/api'
 import { formatDateTime, shortId } from '@/lib/utils'
@@ -39,6 +40,16 @@ export function CourierSession() {
     queryKey: ['courier', 'orders', 'created'],
     queryFn: () =>
       api.get<CourierOrderItem[]>('/lists/courier/orders', { query: { status: 'created' } }),
+  })
+
+  const inventory = useQuery({
+    queryKey: ['courier', 'restaurant-inventory', session?.order_id],
+    queryFn: () =>
+      api.get<RestaurantInventoryItem[]>('/lists/restaurant/inventory', {
+        query: { order_id: session!.order_id },
+      }),
+    enabled: Boolean(session?.order_id),
+    refetchInterval: 15_000,
   })
 
   const create = useMutation({
@@ -217,6 +228,50 @@ export function CourierSession() {
               </div>
             </CardContent>
           </Card>
+
+          {!confirmed ? (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Package className="size-4" /> 餐廳可掃資產
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    ({(inventory.data ?? []).length} 件)
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-2">
+                {inventory.isLoading ? (
+                  <p className="text-sm text-muted-foreground">載入中…</p>
+                ) : (inventory.data ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    餐廳目前沒有 at_restaurant 的資產，請確認是否已簽收 dispatch。
+                  </p>
+                ) : (
+                  <ul className="grid gap-1.5 sm:grid-cols-2">
+                    {inventory.data!.map((a) => (
+                      <li key={a.asset_id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTab('short_code')
+                            setShortCode(a.short_code)
+                            toast.success(`已帶入 ${a.short_code}，按送出即可掃`)
+                          }}
+                          className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+                        >
+                          <span className="flex items-center gap-2">
+                            <Badge variant="secondary">{ASSET_LABEL[a.asset_type]}</Badge>
+                            <span className="font-mono text-xs">{a.short_code}</span>
+                          </span>
+                          <Badge variant="outline">點擊代填</Badge>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
 
           {!confirmed ? (
             <Card>
