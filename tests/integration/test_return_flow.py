@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from app.domain.assets.models import Asset, AssetEvent, AssetEventType
@@ -370,3 +370,135 @@ async def test_cancel_return_session_rolls_asset_back(
     async with sm() as db:
         db_asset = (await db.execute(select(Asset))).scalar_one()
         assert db_asset.status.value == "with_consumer"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_scan_at_same_box_is_rejected(
+    api_client: AsyncClient,
+    test_engine,
+) -> None:
+    """Fix 1: only one active SCANNED session per box is allowed.
+
+    Without this, the sensor matcher (which picks the most recent SCANNED
+    session) could attribute one drop to the wrong asset when two consumers
+    scan back-to-back at the same box.
+    """
+    sm = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+    _, box_id = await _seed_partner_and_box(sm)
+
+    cleaning_center = uuid.uuid4()
+    cleaning_actor = uuid.uuid4()
+    restaurant = uuid.uuid4()
+    restaurant_actor = uuid.uuid4()
+    courier = uuid.uuid4()
+
+    delivered = await _walk_to_with_consumer(
+        api_client,
+        cleaning_center=cleaning_center,
+        cleaning_actor=cleaning_actor,
+        restaurant=restaurant,
+        restaurant_actor=restaurant_actor,
+        courier=courier,
+        asset_count=2,
+    )
+    asset_a, asset_b = delivered[0], delivered[1]
+
+    first = await api_client.post(
+        "/consumer/returns/scan",
+        json={"asset_token": asset_a["asset_token"], "return_box_id": str(box_id)},
+        headers={"X-Role": "consumer", "X-Actor-Id": asset_a["consumer_id"]},
+    )
+    assert first.status_code == 201, first.text
+
+    # Second consumer (or same consumer with a different asset) at the same box
+    # should be blocked while the first session is still active.
+    second = await api_client.post(
+        "/consumer/returns/scan",
+        json={"asset_token": asset_b["asset_token"], "return_box_id": str(box_id)},
+        headers={"X-Role": "consumer", "X-Actor-Id": asset_b["consumer_id"]},
+    )
+    assert second.status_code == 409, second.text
+    assert "another return is in progress" in second.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sensor_event_with_clock_skew_rejected(
+    api_client: AsyncClient,
+    test_engine,
+) -> None:
+    """Fix 3: triggered_at outside the allowed skew window is rejected."""
+    sm = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+    _, box_id = await _seed_partner_and_box(sm)
+
+    far_past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    response = await api_client.post(
+        f"/devices/return-boxes/{box_id}/sensor-events",
+        json={
+            "device_event_id": "skew-1",
+            "event_type": "micro_switch_triggered",
+            "triggered_at": far_past,
+        },
+        headers={"X-Device-Key": DEVICE_KEY},
+    )
+    assert response.status_code == 422
+    assert "clock skew" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_sensor_event_does_not_lie_when_asset_not_pending(
+    api_client: AsyncClient,
+    test_engine,
+) -> None:
+    """Fix 2: if the matched session's asset isn't in return_pending_deposit
+    (e.g., a concurrent cancel), the sensor event must NOT claim it recorded
+    a deposit, and matched_return_session_id must be null.
+    """
+    sm = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
+    _, box_id = await _seed_partner_and_box(sm)
+
+    cleaning_center = uuid.uuid4()
+    cleaning_actor = uuid.uuid4()
+    restaurant = uuid.uuid4()
+    restaurant_actor = uuid.uuid4()
+    courier = uuid.uuid4()
+
+    delivered = await _walk_to_with_consumer(
+        api_client,
+        cleaning_center=cleaning_center,
+        cleaning_actor=cleaning_actor,
+        restaurant=restaurant,
+        restaurant_actor=restaurant_actor,
+        courier=courier,
+    )
+    asset = delivered[0]
+
+    scan = await api_client.post(
+        "/consumer/returns/scan",
+        json={"asset_token": asset["asset_token"], "return_box_id": str(box_id)},
+        headers={"X-Role": "consumer", "X-Actor-Id": asset["consumer_id"]},
+    )
+    return_session_id = scan.json()["return_session_id"]
+
+    # Force the asset back to with_consumer via the cancel route so the next
+    # sensor event will have no valid pending session at this box.
+    await api_client.post(
+        f"/consumer/return-sessions/{return_session_id}/cancel",
+        headers={"X-Role": "consumer", "X-Actor-Id": asset["consumer_id"]},
+    )
+
+    sensor = await api_client.post(
+        f"/devices/return-boxes/{box_id}/sensor-events",
+        json={
+            "device_event_id": "evt-skip-1",
+            "event_type": "micro_switch_triggered",
+            "triggered_at": datetime.now(UTC).isoformat(),
+        },
+        headers={"X-Device-Key": DEVICE_KEY},
+    )
+    assert sensor.status_code == 202
+    body = sensor.json()
+    assert body["deposit_recorded"] is False
+    # No active SCANNED session remains, so matched is null and message is
+    # the orphan path.
+    assert body["matched_return_session_id"] is None
+    assert "orphan" in body["message"]

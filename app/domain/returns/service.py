@@ -82,6 +82,28 @@ class ReturnService:
         if existing is not None:
             return ScanResult(session=existing, asset=asset, is_current_holder=is_current_holder)
 
+        # Enforce a single active SCANNED session per return box. Without this,
+        # the sensor matcher (which picks the most recent SCANNED session) can
+        # attribute one drop to the wrong asset when two consumers scan back-
+        # to-back at the same box.
+        other_active = (
+            await session.execute(
+                select(ReturnSession.id)
+                .where(
+                    ReturnSession.return_box_id == return_box_id,
+                    ReturnSession.status == ReturnSessionStatus.SCANNED,
+                    ReturnSession.expires_at > now,
+                    ReturnSession.asset_id != asset.id,
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if other_active is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="another return is in progress at this box; please wait or cancel it",
+            )
+
         settings = get_settings()
         assert_transition(asset.status, AssetStatus.RETURN_PENDING_DEPOSIT, ActorRole.CONSUMER)
         asset.status = AssetStatus.RETURN_PENDING_DEPOSIT
