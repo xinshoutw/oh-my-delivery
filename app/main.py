@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import cleaning, courier, partner, restaurant
+from app.api.routes import cleaning, consumer, courier, devices, partner, restaurant
 from app.core.config import get_settings
 
 
@@ -33,6 +33,8 @@ def create_app() -> FastAPI:
     app.include_router(restaurant.router)
     app.include_router(partner.router)
     app.include_router(courier.router)
+    app.include_router(consumer.router)
+    app.include_router(devices.router)
     return app
 
 
