@@ -6,8 +6,19 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import admin, cleaning, consumer, courier, devices, partner, restaurant
+from app.api.routes import (
+    admin,
+    cleaning,
+    consumer,
+    courier,
+    devices,
+    lists,
+    onboarding,
+    partner,
+    restaurant,
+)
 from app.core.config import get_settings
 
 
@@ -25,6 +36,16 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # 配置 CORS
+    # 在「全開」模式下, allow_origins 使用 ["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # 允許所有來源
+        allow_credentials=True,
+        allow_methods=["*"],  # 允許所有 HTTP 方法 (GET, POST, PUT, DELETE 等)
+        allow_headers=["*"],  # 允許所有 Header
+    )
+
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:
         return {"status": "ok", "env": settings.env}
@@ -36,6 +57,8 @@ def create_app() -> FastAPI:
     app.include_router(consumer.router)
     app.include_router(devices.router)
     app.include_router(admin.router)
+    app.include_router(onboarding.router)
+    app.include_router(lists.router)
     return app
 
 

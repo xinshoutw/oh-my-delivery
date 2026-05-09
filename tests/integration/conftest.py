@@ -73,6 +73,13 @@ _TABLES_TO_CLEAR = (
     "partner_consumers",
     "consumers",
     "partners",
+    "users",
+    "organizations",
+    "notifications",
+    "chain_anchors",
+    "reward_transactions",
+    "washing_batch_items",
+    "washing_batches",
 )
 
 
