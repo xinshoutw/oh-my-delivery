@@ -9,6 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import Actor, get_db_session, require_role
 from app.domain.assets.enums import ActorRole, AssetType
+from app.domain.delivery.schemas import (
+    DeliveredAssetItem,
+    DeliverFailedResponse,
+    DeliverRequest,
+    DeliverSuccessResponse,
+)
+from app.domain.delivery.service import DeliveryFailure, DeliveryService, DeliverySuccess
 from app.domain.pickup.schemas import (
     CancelPickupResponse,
     ConfirmedAssetItem,
@@ -142,3 +149,53 @@ async def cancel_pickup(
         courier_id=actor.id,
     )
     return CancelPickupResponse(pickup_session_id=pickup.id, status=pickup.status)
+
+
+@router.post(
+    "/orders/{order_id}/deliver",
+    responses={
+        200: {"model": DeliverSuccessResponse},
+        401: {"model": DeliverFailedResponse},
+    },
+)
+async def deliver_order(
+    order_id: uuid.UUID,
+    body: DeliverRequest,
+    session: AsyncSession = Depends(get_db_session),
+    actor: Actor = Depends(require_role(ActorRole.COURIER, ActorRole.ADMIN)),
+):
+    result = await DeliveryService.deliver(
+        session,
+        order_id=order_id,
+        courier_id=actor.id,
+        pin=body.pin,
+    )
+    if isinstance(result, DeliverySuccess):
+        return DeliverSuccessResponse(
+            status="delivered",
+            order_id=result.order_id,
+            consumer_id=result.consumer_id,
+            delivered_assets=[
+                DeliveredAssetItem(
+                    asset_id=d.asset_id,
+                    asset_type=AssetType(d.asset_type),
+                    deposit_id=d.deposit_id,
+                    deposit_amount=d.amount,
+                    due_at=d.due_at,
+                    reward_cutoff_at=d.reward_cutoff_at,
+                )
+                for d in result.deposits
+            ],
+            consumer_wallet_balance_after=result.consumer_wallet_balance_after,
+        )
+    assert isinstance(result, DeliveryFailure)
+    payload = DeliverFailedResponse(
+        status=result.reason,
+        order_id=order_id,
+        remaining_attempts=result.remaining_attempts,
+        support_required=result.support_required,
+        reason=result.reason,
+    )
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(status_code=401, content=payload.model_dump(mode="json"))
