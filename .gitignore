@@ -45,3 +45,12 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 *.log
+
+# Node / Vite (web/)
+web/node_modules/
+web/dist/
+web/dev-dist/
+web/.vite/
+web/stats.html
+web/pnpm-debug.log*
+web/npm-debug.log*
