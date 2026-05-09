@@ -9,6 +9,16 @@ from app.api.deps import Actor, get_db_session, require_role
 from app.domain.assets.enums import ActorRole
 from app.domain.assets.schemas import CreateAssetsRequest, CreateAssetsResponse
 from app.domain.assets.service import AssetService
+from app.domain.cleaning.schemas import (
+    CompleteWashingRequest,
+    CompleteWashingResponse,
+    InspectRequest,
+    InspectResponse,
+    ReceiveAssetsRequest,
+    ReceiveAssetsResponse,
+    ReceivedAssetItem,
+)
+from app.domain.cleaning.service import CleaningService
 from app.domain.dispatches.schemas import (
     CreateDispatchRequest,
     DispatchResponse,
@@ -61,6 +71,71 @@ async def prepare_for_dispatch(
         actor_id=actor.id,
     )
     return PrepareForDispatchResponse(prepared_count=len(asset_ids), asset_ids=asset_ids)
+
+
+@router.post("/receive", response_model=ReceiveAssetsResponse)
+async def receive_assets(
+    body: ReceiveAssetsRequest,
+    session: AsyncSession = Depends(get_db_session),
+    actor: Actor = Depends(require_role(ActorRole.CLEANING_CENTER, ActorRole.ADMIN)),
+) -> ReceiveAssetsResponse:
+    _require_org(actor)
+    assert actor.organization_id is not None
+    reports = await CleaningService.receive_assets(
+        session,
+        asset_tokens=body.asset_tokens,
+        cleaning_center_id=actor.organization_id,
+        actor_id=actor.id,
+    )
+    return ReceiveAssetsResponse(
+        received=[
+            ReceivedAssetItem(
+                asset_id=r.asset_id,
+                asset_type=r.asset_type,
+                deposit_outcome=r.deposit_outcome,
+                reward_granted=r.reward_granted,
+                reward_points=r.reward_points,
+            )
+            for r in reports
+        ]
+    )
+
+
+@router.post("/inspection", response_model=InspectResponse)
+async def inspect_asset(
+    body: InspectRequest,
+    session: AsyncSession = Depends(get_db_session),
+    actor: Actor = Depends(require_role(ActorRole.CLEANING_CENTER, ActorRole.ADMIN)),
+) -> InspectResponse:
+    _require_org(actor)
+    assert actor.organization_id is not None
+    asset = await CleaningService.inspect(
+        session,
+        asset_id=body.asset_id,
+        condition=body.condition,
+        component_status=body.component_status,
+        notes=body.notes,
+        cleaning_center_id=actor.organization_id,
+        actor_id=actor.id,
+    )
+    return InspectResponse(asset_id=asset.id, new_status=asset.status.value)
+
+
+@router.post("/washing-batches/complete", response_model=CompleteWashingResponse)
+async def complete_washing_batch(
+    body: CompleteWashingRequest,
+    session: AsyncSession = Depends(get_db_session),
+    actor: Actor = Depends(require_role(ActorRole.CLEANING_CENTER, ActorRole.ADMIN)),
+) -> CompleteWashingResponse:
+    _require_org(actor)
+    assert actor.organization_id is not None
+    assets = await CleaningService.complete_washing(
+        session,
+        asset_ids=body.asset_ids,
+        cleaning_center_id=actor.organization_id,
+        actor_id=actor.id,
+    )
+    return CompleteWashingResponse(asset_ids=[a.id for a in assets])
 
 
 @router.post("/dispatches", response_model=DispatchResponse, status_code=201)

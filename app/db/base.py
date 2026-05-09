@@ -35,3 +35,5 @@ def import_all_models() -> None:
     from app.domain.partners import models as _partners  # noqa: F401
     from app.domain.pickup import models as _pickup  # noqa: F401
     from app.domain.returns import models as _returns  # noqa: F401
+    from app.domain.rewards import models as _rewards  # noqa: F401
+    from app.domain.washing import models as _washing  # noqa: F401
