@@ -18,8 +18,8 @@ export function formatDateTime(value: string | Date | null | undefined): string 
   })
 }
 
-export function shortId(id: string | null | undefined, head = 6, tail = 4): string {
+export function shortId(id: string | null | undefined, length = 8): string {
   if (!id) return '-'
-  if (id.length <= head + tail + 1) return id
-  return `${id.slice(0, head)}…${id.slice(-tail)}`
+  if (id.length <= length) return id
+  return id.slice(-length)
 }

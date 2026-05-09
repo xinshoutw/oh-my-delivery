@@ -99,7 +99,7 @@ export function Login() {
 
       <p className="mt-6 text-center text-xs text-muted-foreground">
         Bootstrap admin id（自動產生）：
-        <span className="ml-1 font-mono">{shortId(bootstrapApi.adminId(), 8, 6)}</span>
+        <span className="ml-1 font-mono">{shortId(bootstrapApi.adminId(), 12)}</span>
       </p>
     </div>
   )
