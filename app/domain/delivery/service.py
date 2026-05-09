@@ -36,6 +36,7 @@ from app.domain.consumers.models import Consumer
 from app.domain.delivery.models import DeliveryPinAttempt
 from app.domain.deposits.models import DepositRecord, DepositStatus
 from app.domain.hashchain.service import HashChainService
+from app.domain.notifications.service import NotificationService
 from app.domain.orders.models import Order, OrderStatus
 from app.domain.orders.order_assets import OrderAsset
 
@@ -258,6 +259,8 @@ async def _commit_delivery(
             created_at=now,
         )
         session.add(deposit)
+        await session.flush()
+        await NotificationService.schedule_for_deposit(session, deposit)
 
         consumer.wallet_balance -= deposit_amount
 

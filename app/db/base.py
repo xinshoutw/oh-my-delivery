@@ -30,6 +30,8 @@ def import_all_models() -> None:
     from app.domain.deposits import models as _deposits  # noqa: F401
     from app.domain.devices import models as _devices  # noqa: F401
     from app.domain.dispatches import models as _dispatches  # noqa: F401
+    from app.domain.hashchain import anchor_models as _anchor  # noqa: F401
+    from app.domain.notifications import models as _notifications  # noqa: F401
     from app.domain.orders import models as _orders  # noqa: F401
     from app.domain.orders import order_assets as _order_assets  # noqa: F401
     from app.domain.partners import models as _partners  # noqa: F401
