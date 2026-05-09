@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import cleaning
+from app.api.routes import cleaning, restaurant
 from app.core.config import get_settings
 
 
@@ -30,6 +30,7 @@ def create_app() -> FastAPI:
         return {"status": "ok", "env": settings.env}
 
     app.include_router(cleaning.router)
+    app.include_router(restaurant.router)
     return app
 
 

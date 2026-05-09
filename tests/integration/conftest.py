@@ -55,6 +55,8 @@ async def test_engine() -> AsyncIterator[AsyncEngine]:
 
 
 _TABLES_TO_CLEAR = (
+    "dispatch_assets",
+    "dispatches",
     "asset_events",
     "audit_logs",
     "asset_cycles",

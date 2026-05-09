@@ -25,3 +25,4 @@ def import_all_models() -> None:
     """
     from app.domain.assets import models as _assets  # noqa: F401
     from app.domain.audit import models as _audit  # noqa: F401
+    from app.domain.dispatches import models as _dispatches  # noqa: F401
