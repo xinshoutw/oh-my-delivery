@@ -214,7 +214,7 @@ async def list_consumers(
     return [
         ConsumerOut(
             id=c.id,
-            label=c.email or c.phone or str(c.id)[:8],
+            label=c.email or c.phone or c.id.hex[-8:],
             email=c.email,
             phone=c.phone,
             wallet_balance=c.wallet_balance,
