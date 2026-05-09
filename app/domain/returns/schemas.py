@@ -46,4 +46,5 @@ class SensorEventResponse(BaseModel):
     sensor_event_id: uuid.UUID
     duplicate: bool
     matched_return_session_id: uuid.UUID | None
+    deposit_recorded: bool
     message: str

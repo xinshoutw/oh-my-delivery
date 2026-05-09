@@ -42,13 +42,16 @@ async def ingest_sensor_event(
     )
     if result.duplicate:
         msg = "duplicate device_event_id; ignored"
-    elif result.matched_session is not None:
+    elif result.deposit_recorded:
         msg = "matched return session; deposit recorded"
+    elif result.matched_session is not None:
+        msg = "session found but asset not in return_pending_deposit; no transition"
     else:
         msg = "orphan event recorded; no active return session"
     return SensorEventResponse(
         sensor_event_id=result.sensor_event.id,
         duplicate=result.duplicate,
         matched_return_session_id=result.matched_session.id if result.matched_session else None,
+        deposit_recorded=result.deposit_recorded,
         message=msg,
     )

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.hashing import hmac_sha256_hex
 from app.core.ids import new_uuid7
 from app.domain.assets.enums import (
@@ -34,6 +35,7 @@ class IngestResult:
     sensor_event: SensorEvent
     duplicate: bool
     matched_session: ReturnSession | None
+    deposit_recorded: bool
 
 
 class ReturnBoxService:
@@ -86,6 +88,18 @@ class SensorEventService:
         event_type: str,
         triggered_at: datetime,
     ) -> IngestResult:
+        now = datetime.now(UTC)
+        settings = get_settings()
+        skew = abs((now - triggered_at).total_seconds())
+        if skew > settings.sensor_event_max_clock_skew_seconds:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"triggered_at clock skew {int(skew)}s exceeds "
+                    f"{settings.sensor_event_max_clock_skew_seconds}s; check device NTP"
+                ),
+            )
+
         existing = (
             await session.execute(
                 select(SensorEvent).where(
@@ -96,6 +110,7 @@ class SensorEventService:
         ).scalar_one_or_none()
         if existing is not None:
             matched = None
+            deposit_recorded = False
             if existing.matched_return_session_id is not None:
                 matched = (
                     await session.execute(
@@ -104,9 +119,17 @@ class SensorEventService:
                         )
                     )
                 ).scalar_one_or_none()
-            return IngestResult(sensor_event=existing, duplicate=True, matched_session=matched)
+                deposit_recorded = (
+                    matched is not None
+                    and matched.status == ReturnSessionStatus.DEPOSIT_DETECTED
+                )
+            return IngestResult(
+                sensor_event=existing,
+                duplicate=True,
+                matched_session=matched,
+                deposit_recorded=deposit_recorded,
+            )
 
-        now = datetime.now(UTC)
         active_session = (
             await session.execute(
                 select(ReturnSession)
@@ -121,17 +144,8 @@ class SensorEventService:
             )
         ).scalar_one_or_none()
 
-        sensor_event = SensorEvent(
-            id=new_uuid7(),
-            return_box_id=return_box_id,
-            device_event_id=device_event_id,
-            event_type=event_type,
-            matched_return_session_id=active_session.id if active_session else None,
-            triggered_at=triggered_at,
-            received_at=now,
-        )
-        session.add(sensor_event)
-
+        deposit_recorded = False
+        matched_session_id: uuid.UUID | None = None
         if active_session is not None:
             asset = (
                 await session.execute(
@@ -139,36 +153,53 @@ class SensorEventService:
                 )
             ).scalar_one()
             if asset.status == AssetStatus.RETURN_PENDING_DEPOSIT:
-                assert_transition(
-                    asset.status,
-                    AssetStatus.DEPOSITED_IN_RETURN_BOX,
-                    ActorRole.SYSTEM,
-                )
-                asset.status = AssetStatus.DEPOSITED_IN_RETURN_BOX
-                asset.physical_holder_type = HolderType.RETURN_BOX
-                asset.physical_holder_id = return_box_id
-                session.add(asset)
+                deposit_recorded = True
+                matched_session_id = active_session.id
 
-                active_session.status = ReturnSessionStatus.DEPOSIT_DETECTED
-                active_session.deposit_detected_at = now
-                session.add(active_session)
+        sensor_event = SensorEvent(
+            id=new_uuid7(),
+            return_box_id=return_box_id,
+            device_event_id=device_event_id,
+            event_type=event_type,
+            # Only attribute the event to a session when we can actually settle
+            # it; otherwise we'd lie to the device caller and the audit trail.
+            matched_return_session_id=matched_session_id,
+            triggered_at=triggered_at,
+            received_at=now,
+        )
+        session.add(sensor_event)
 
-                await HashChainService.append(
-                    session,
-                    asset_id=asset.id,
-                    event_type=AssetEventType.RETURN_BOX_DEPOSIT_DETECTED,
-                    actor_role=ActorRole.SYSTEM,
-                    actor_id=return_box_id,
-                    cycle_id=asset.current_cycle_id,
-                    from_holder_type=HolderType.CONSUMER,
-                    from_holder_id=active_session.scanned_by_consumer_id,
-                    to_holder_type=HolderType.RETURN_BOX,
-                    to_holder_id=return_box_id,
-                    return_session_id=active_session.id,
-                    occurred_at=now,
-                    lock_asset=False,
-                    metadata={"sensor_event_id": str(sensor_event.id)},
-                )
+        if deposit_recorded and active_session is not None:
+            assert_transition(
+                asset.status,
+                AssetStatus.DEPOSITED_IN_RETURN_BOX,
+                ActorRole.SYSTEM,
+            )
+            asset.status = AssetStatus.DEPOSITED_IN_RETURN_BOX
+            asset.physical_holder_type = HolderType.RETURN_BOX
+            asset.physical_holder_id = return_box_id
+            session.add(asset)
+
+            active_session.status = ReturnSessionStatus.DEPOSIT_DETECTED
+            active_session.deposit_detected_at = now
+            session.add(active_session)
+
+            await HashChainService.append(
+                session,
+                asset_id=asset.id,
+                event_type=AssetEventType.RETURN_BOX_DEPOSIT_DETECTED,
+                actor_role=ActorRole.SYSTEM,
+                actor_id=return_box_id,
+                cycle_id=asset.current_cycle_id,
+                from_holder_type=HolderType.CONSUMER,
+                from_holder_id=active_session.scanned_by_consumer_id,
+                to_holder_type=HolderType.RETURN_BOX,
+                to_holder_id=return_box_id,
+                return_session_id=active_session.id,
+                occurred_at=now,
+                lock_asset=False,
+                metadata={"sensor_event_id": str(sensor_event.id)},
+            )
 
         try:
             await session.flush()
@@ -185,10 +216,16 @@ class SensorEventService:
             ).scalar_one_or_none()
             if row is None:
                 raise HTTPException(status_code=500, detail="sensor ingest race") from err
-            return IngestResult(sensor_event=row, duplicate=True, matched_session=None)
+            return IngestResult(
+                sensor_event=row,
+                duplicate=True,
+                matched_session=None,
+                deposit_recorded=False,
+            )
 
         return IngestResult(
             sensor_event=sensor_event,
             duplicate=False,
-            matched_session=active_session,
+            matched_session=active_session if deposit_recorded else None,
+            deposit_recorded=deposit_recorded,
         )
