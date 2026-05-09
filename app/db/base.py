@@ -34,8 +34,10 @@ def import_all_models() -> None:
     from app.domain.notifications import models as _notifications  # noqa: F401
     from app.domain.orders import models as _orders  # noqa: F401
     from app.domain.orders import order_assets as _order_assets  # noqa: F401
+    from app.domain.organizations import models as _organizations  # noqa: F401
     from app.domain.partners import models as _partners  # noqa: F401
     from app.domain.pickup import models as _pickup  # noqa: F401
     from app.domain.returns import models as _returns  # noqa: F401
     from app.domain.rewards import models as _rewards  # noqa: F401
+    from app.domain.users import models as _users  # noqa: F401
     from app.domain.washing import models as _washing  # noqa: F401
