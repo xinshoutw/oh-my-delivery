@@ -25,4 +25,7 @@ def import_all_models() -> None:
     """
     from app.domain.assets import models as _assets  # noqa: F401
     from app.domain.audit import models as _audit  # noqa: F401
+    from app.domain.consumers import models as _consumers  # noqa: F401
     from app.domain.dispatches import models as _dispatches  # noqa: F401
+    from app.domain.orders import models as _orders  # noqa: F401
+    from app.domain.partners import models as _partners  # noqa: F401

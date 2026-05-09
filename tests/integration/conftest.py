@@ -61,6 +61,10 @@ _TABLES_TO_CLEAR = (
     "audit_logs",
     "asset_cycles",
     "assets",
+    "orders",
+    "partner_consumers",
+    "consumers",
+    "partners",
 )
 
 

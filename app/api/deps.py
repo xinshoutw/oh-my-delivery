@@ -2,7 +2,8 @@
 
 Auth is intentionally stub-shaped for the demo: the actor's role and id are
 read from request headers ``X-Role`` and ``X-Actor-Id``. JWT-based auth will
-replace this once the user-management slice lands.
+replace this once the user-management slice lands. Partner endpoints
+authenticate via ``X-Partner-Api-Key`` header against ``partners.api_key_hash``.
 """
 
 from __future__ import annotations
@@ -14,8 +15,11 @@ from dataclasses import dataclass
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.db.session import get_sessionmaker
 from app.domain.assets.enums import ActorRole
+from app.domain.partners.models import Partner
+from app.domain.partners.service import PartnerService
 
 
 @dataclass(frozen=True)
@@ -71,3 +75,19 @@ def require_role(*allowed: ActorRole):
         return actor
 
     return _dep
+
+
+async def get_partner(
+    x_partner_api_key: str = Header(..., alias="X-Partner-Api-Key"),
+    session: AsyncSession = Depends(get_db_session),
+) -> Partner:
+    settings = get_settings()
+    partner = await PartnerService.find_by_api_key(
+        session, api_key=x_partner_api_key, server_secret=settings.server_secret
+    )
+    if partner is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid partner api key",
+        )
+    return partner
