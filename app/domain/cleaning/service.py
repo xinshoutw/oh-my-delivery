@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.core.hashing import hash_asset_token
+from app.core.hashing import hash_asset_token, hash_short_code
 from app.core.ids import new_uuid7
 from app.domain.assets.enums import (
     ActorRole,
@@ -70,13 +70,18 @@ class CleaningService:
         asset_tokens: list[str],
         cleaning_center_id: uuid.UUID,
         actor_id: uuid.UUID,
+        short_codes: list[str] | None = None,
     ) -> list[ReceivedAssetReport]:
-        if not asset_tokens:
-            raise HTTPException(status_code=400, detail="asset_tokens required")
+        short_codes = short_codes or []
+        if not asset_tokens and not short_codes:
+            raise HTTPException(
+                status_code=400,
+                detail="asset_tokens or short_codes required",
+            )
         settings = get_settings()
         now = datetime.now(UTC)
 
-        assets = await _resolve_assets_by_tokens(session, asset_tokens, settings)
+        assets = await _resolve_assets(session, asset_tokens, short_codes, settings)
         reports: list[ReceivedAssetReport] = []
 
         for asset in assets:
@@ -336,23 +341,39 @@ class CleaningService:
         return list(assets)
 
 
-async def _resolve_assets_by_tokens(
+async def _resolve_assets(
     session: AsyncSession,
     tokens: list[str],
+    short_codes: list[str],
     settings: Settings,
 ) -> list[Asset]:
-    token_hashes = [hash_asset_token(t, settings.server_secret) for t in tokens]
-    rows = list(
-        (
-            await session.execute(
-                select(Asset).where(Asset.token_hash.in_(token_hashes)).with_for_update()
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if len(rows) != len(set(token_hashes)):
-        raise HTTPException(status_code=404, detail="some asset_tokens not found")
+    """Resolve assets by token hash, short_code hash, or both.
+
+    Each input is its own filter — duplicates across the two lists collapse to
+    one row. We require every input to map to a row so the caller learns about
+    typos instead of silently receiving fewer assets than expected.
+    """
+    token_hashes = {hash_asset_token(t, settings.server_secret) for t in tokens}
+    code_hashes = {hash_short_code(c.strip().upper()) for c in short_codes if c.strip()}
+
+    conditions = []
+    if token_hashes:
+        conditions.append(Asset.token_hash.in_(token_hashes))
+    if code_hashes:
+        conditions.append(Asset.short_code_hash.in_(code_hashes))
+    if not conditions:
+        return []
+    from sqlalchemy import or_
+
+    stmt = select(Asset).where(or_(*conditions)).with_for_update()
+    rows = list((await session.execute(stmt)).scalars().all())
+
+    found_token_hashes = {a.token_hash for a in rows}
+    found_code_hashes = {a.short_code_hash for a in rows}
+    missing_tokens = token_hashes - found_token_hashes
+    missing_codes = code_hashes - found_code_hashes
+    if missing_tokens or missing_codes:
+        raise HTTPException(status_code=404, detail="some asset_tokens or short_codes not found")
     return rows
 
 

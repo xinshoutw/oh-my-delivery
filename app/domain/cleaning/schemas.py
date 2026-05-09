@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ReceiveAssetsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    asset_tokens: list[str] = Field(min_length=1, max_length=500)
+    asset_tokens: list[str] = Field(default_factory=list, max_length=500)
+    short_codes: list[str] = Field(default_factory=list, max_length=500)
 
 
 class ReceivedAssetItem(BaseModel):

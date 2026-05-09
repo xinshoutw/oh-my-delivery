@@ -84,6 +84,7 @@ async def receive_assets(
     reports = await CleaningService.receive_assets(
         session,
         asset_tokens=body.asset_tokens,
+        short_codes=body.short_codes,
         cleaning_center_id=actor.organization_id,
         actor_id=actor.id,
     )
