@@ -183,6 +183,97 @@ async def restaurant_dispatches(
     ]
 
 
+# --- Restaurant inventory ----------------------------------------------------
+
+
+class RestaurantInventoryItem(BaseModel):
+    asset_id: uuid.UUID
+    asset_type: AssetType
+    short_code: str
+    status: AssetStatus
+    usage_count: int
+
+
+@router.get("/restaurant/inventory", response_model=list[RestaurantInventoryItem])
+async def restaurant_inventory(
+    session: AsyncSession = Depends(get_db_session),
+    actor: Actor = Depends(
+        require_role(
+            ActorRole.RESTAURANT,
+            ActorRole.COURIER,
+            ActorRole.ADMIN,
+        )
+    ),
+    restaurant_id: uuid.UUID | None = Query(default=None),
+    order_id: uuid.UUID | None = Query(default=None),
+    asset_type: AssetType | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+) -> Sequence[RestaurantInventoryItem]:
+    """List assets currently at a restaurant.
+
+    Resolution rules:
+    - RESTAURANT actor: scoped to own organization (X-Organization-Id required).
+    - COURIER actor: must pass order_id; the order's restaurant_id is used,
+      and the courier must own the order.
+    - ADMIN actor: must pass restaurant_id (or order_id, which resolves to one).
+    """
+    target: uuid.UUID
+    if actor.role == ActorRole.RESTAURANT:
+        if actor.organization_id is None:
+            raise HTTPException(status_code=400, detail="X-Organization-Id required")
+        target = actor.organization_id
+    elif actor.role == ActorRole.COURIER:
+        if order_id is None:
+            raise HTTPException(status_code=400, detail="order_id required for courier")
+        order = (
+            await session.execute(select(Order).where(Order.id == order_id))
+        ).scalar_one_or_none()
+        if order is None:
+            raise HTTPException(status_code=404, detail="order not found")
+        if order.courier_id != actor.id:
+            raise HTTPException(status_code=403, detail="order not owned by courier")
+        target = order.restaurant_id
+    else:  # ADMIN
+        if order_id is not None:
+            order = (
+                await session.execute(select(Order).where(Order.id == order_id))
+            ).scalar_one_or_none()
+            if order is None:
+                raise HTTPException(status_code=404, detail="order not found")
+            target = order.restaurant_id
+        elif restaurant_id is not None:
+            target = restaurant_id
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="restaurant_id or order_id required for admin scope",
+            )
+
+    stmt = (
+        select(Asset)
+        .where(
+            Asset.physical_holder_type == HolderType.RESTAURANT,
+            Asset.physical_holder_id == target,
+            Asset.status == AssetStatus.AT_RESTAURANT,
+        )
+        .order_by(Asset.created_at.desc())
+        .limit(limit)
+    )
+    if asset_type is not None:
+        stmt = stmt.where(Asset.asset_type == asset_type)
+    rows = (await session.execute(stmt)).scalars().all()
+    return [
+        RestaurantInventoryItem(
+            asset_id=a.id,
+            asset_type=a.asset_type,
+            short_code=a.short_code,
+            status=a.status,
+            usage_count=a.usage_count,
+        )
+        for a in rows
+    ]
+
+
 # --- Cleaning center assets --------------------------------------------------
 
 

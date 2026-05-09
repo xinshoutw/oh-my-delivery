@@ -118,6 +118,14 @@ export interface RestaurantDispatchItem {
   acknowledged_at: string | null
 }
 
+export interface RestaurantInventoryItem {
+  asset_id: string
+  asset_type: AssetType
+  short_code: string
+  status: AssetStatus
+  usage_count: number
+}
+
 export interface CleaningAssetItem {
   asset_id: string
   asset_type: AssetType
